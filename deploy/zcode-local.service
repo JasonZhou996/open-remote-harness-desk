@@ -1,0 +1,19 @@
+[Unit]
+Description=ZCode connected to the local WebUI relay
+Wants=codex-webui.service
+After=codex-webui.service graphical-session.target
+PartOf=graphical-session.target ai-webui.target
+
+[Service]
+Type=simple
+Environment=ZCODE_WEB_REMOTE_CONTROL_RELAY_WS_URL=ws://127.0.0.1:8898
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+ExecStart=/opt/ZCode/zcode
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=ai-webui.target

@@ -1,0 +1,53 @@
+import assert from 'node:assert/strict';
+import {desktopProjects} from '../server/codex/desktop-projects.js';
+import {launchOptions} from './browser-runtime.mjs';
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
+const browser=await chromium.launch(launchOptions());
+try {
+  const page=await browser.newPage({viewport:{width:1280,height:850}}),errors=[];
+  const saved={'local-projects':{a:{id:'a',name:'项目甲',rootPaths:['/tmp/a']},b:{id:'b',name:'空项目乙',rootPaths:['/tmp/b']}},'project-order':['b','a'],'thread-project-assignments':{task:{projectKind:'local',projectId:'a'}}};
+  let threads=[{id:'task',name:'原标题',cwd:'/tmp/original',status:{type:'idle'},turns:[{id:'turn',status:'completed',items:[{id:'answer',type:'agentMessage',text:'保留历史内容'}]}]}];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.addInitScript(()=>{if(window!==window.top)return;window.CodexBrowser={hide(){}};localStorage.setItem('codex-webui-locale','zh-CN');localStorage.setItem('codex-webui-expanded-project','a');window.EventSource=class {constructor(){window.testEvents=this;queueMicrotask(()=>this.onmessage?.({data:JSON.stringify({type:'bridge/status',status:'connected'})}))}close(){}}});
+  await page.route('**/api/rpc',async route=>{
+    const {id,method,params}=route.request().postDataJSON(),data=structuredClone(threads),projects=desktopProjects(saved,data);let result;
+    if(method==='thread/list')result={data,projects};
+    else if(method==='thread/read'&&params.threadId==='task')result={thread:data[0]};
+    else if(method==='host/thread/live'&&params.threadId==='task')result={active:false,turn:data[0]?.turns[0]};
+    else return route.continue();
+    await route.fulfill({json:{type:'rpc/result',id,result}});
+  });
+  await page.goto((process.env.CODEX_WEBUI_TEST_URL||'http://127.0.0.1:8899')+'/?thread=task',{waitUntil:'domcontentloaded'});
+  await page.locator('.thread-item[data-id="task"]').waitFor();
+  assert.deepEqual(await page.locator('.sidebar-project-row').allTextContents(),['空项目乙','项目甲']);
+  const changed=()=>page.evaluate(()=>window.testEvents.onmessage({data:JSON.stringify({type:'host/thread-list-invalidated'})}));
+  // Only membership changes: no new message, cwd, title or timestamp change.
+  saved['thread-project-assignments'].task.projectId='b';await changed();
+  await page.waitForFunction(()=>document.querySelector('#projectName').textContent==='空项目乙');
+  assert.equal(await page.locator('.thread-item[data-id="task"]').count(),0);
+  saved['thread-project-assignments'].task.projectId='a';await changed();
+  await page.locator('.thread-item[data-id="task"]').waitFor();
+  saved['local-projects'].a.name='重命名项目';saved['project-order']=['a','b'];
+  saved['thread-project-assignments'].task.projectId='b';threads[0].name='桌面改名';
+  await changed();await page.waitForFunction(()=>document.querySelector('#threadTitle').textContent==='桌面改名');
+  assert.deepEqual(await page.locator('.sidebar-project-row').allTextContents(),['重命名项目','空项目乙']);
+  assert.equal(await page.locator('.thread-item[data-id="task"]').count(),0,'task moved out of expanded old project');
+  await page.locator('.sidebar-project-row[data-project-id="b"]').click();await page.locator('.thread-item[data-id="task"]').waitFor();
+  assert.equal(await page.evaluate(()=>globalThis.__codexWebuiDebug.state.active.cwd),'/tmp/original');
+  assert.equal(await page.locator('#projectName').textContent(),'空项目乙');
+  delete saved['local-projects'].b;await changed();
+  await page.waitForFunction(()=>globalThis.__codexWebuiDebug.state.active.projectless);
+  assert.equal(await page.locator('.sidebar-project-row[data-project-id="b"]').count(),0);
+  assert.equal(await page.locator('.thread-item[data-id="task"].project-thread-item').count(),0);
+  await page.locator('#newTask').click();await page.locator('#prompt').fill('草稿保留');await page.locator('#composerProjectButton').click();
+  saved['local-projects'].c={id:'c',name:'新增空项目',rootPaths:['/tmp/c']};saved['project-order']=['c','a'];
+  await changed();await page.locator('#composerProjectChoices button[data-project-path="/tmp/c"]').waitFor();
+  assert.equal(await page.locator('#prompt').inputValue(),'草稿保留');
+  await page.locator('#composerProjectChoices button[data-project-path="/tmp/c"]').click();
+  assert.equal(await page.locator('#composerProjectLabel').textContent(),'新增空项目');
+  threads=[];await changed();await page.waitForFunction(()=>!document.querySelector('.thread-item[data-id="task"]'));
+  await page.reload({waitUntil:'domcontentloaded'});await page.locator('.sidebar-project-row[data-project-id="c"]').waitFor();
+  assert.deepEqual(await page.locator('.sidebar-project-row').allTextContents(),['新增空项目','重命名项目']);
+  assert.deepEqual(errors,[]);
+  console.log('PASS: event-driven project rename/order/create/delete, task rename/move/removal, picker, draft and reload');
+} finally {await browser.close();}

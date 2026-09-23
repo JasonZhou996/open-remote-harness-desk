@@ -1,0 +1,73 @@
+import type { LLMProvider } from '@/shared/types.js';
+
+/**
+ * Static, backend-owned description of what one provider integration supports.
+ *
+ * The frontend renders its composer UI (permission mode picker, image upload,
+ * abort button, ...) purely from this shape, which is what keeps the frontend
+ * free of per-provider conditionals. New provider features should be exposed
+ * here instead of branching on the provider id in React components.
+ */
+type ProviderCapabilities = {
+  provider: LLMProvider;
+  /** Permission modes the provider runtime understands, in cycle order. */
+  permissionModes: string[];
+  defaultPermissionMode: string;
+  /** Whether image attachments can be included in a chat.send. */
+  supportsImages: boolean;
+  /** Whether general file attachments can be included in a chat.send. */
+  supportsFiles: boolean;
+  /** Whether an in-flight run can be cancelled via chat.abort. */
+  supportsAbort: boolean;
+  /** Whether interactive tool permission prompts can reach the UI. */
+  supportsPermissionRequests: boolean;
+  /** Whether the token-usage endpoint has data for this provider. */
+  supportsTokenUsage: boolean;
+  /** Whether the provider runtime can accept model-level reasoning effort. */
+  supportsEffort: boolean;
+  /**
+   * Whether an already-sent message can be replaced, which requires the
+   * provider to re-run a conversation truncated at a chosen point.
+   */
+  supportsMessageEditing: boolean;
+  /**
+   * Whether a session's transcript can be branched into an independent one.
+   */
+  supportsSessionForking: boolean;
+};
+
+/**
+ * The capability matrix mirrors what the runtime actually implements today:
+ * permission modes match the option set the Claude CLI/SDK accepts, and the
+ * SDK integration is what makes interactive permission requests possible.
+ */
+const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
+  claude: {
+    provider: 'claude',
+    permissionModes: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
+    defaultPermissionMode: 'default',
+    supportsImages: true,
+    supportsFiles: true,
+    supportsAbort: true,
+    supportsPermissionRequests: true,
+    supportsTokenUsage: true,
+    supportsEffort: true,
+    // `resumeSessionAt` re-runs a conversation truncated at a message, and
+    // `forkSession` copies a transcript prefix into a new session file.
+    supportsMessageEditing: true,
+    supportsSessionForking: true,
+  },
+};
+
+/**
+ * Application service exposing the provider capability matrix.
+ */
+export const providerCapabilitiesService = {
+  getProviderCapabilities(provider: LLMProvider): ProviderCapabilities {
+    return PROVIDER_CAPABILITIES[provider];
+  },
+
+  listAllProviderCapabilities(): ProviderCapabilities[] {
+    return Object.values(PROVIDER_CAPABILITIES);
+  },
+};

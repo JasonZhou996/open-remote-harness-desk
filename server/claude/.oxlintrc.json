@@ -1,0 +1,211 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "dist-server*/**",
+    "node_modules/**"
+  ],
+  "plugins": [
+    "typescript",
+    "oxc",
+    "import"
+  ],
+  "jsPlugins": [
+    {
+      "name": "importx",
+      "specifier": "eslint-plugin-import-x"
+    },
+    {
+      "name": "boundaries",
+      "specifier": "eslint-plugin-boundaries"
+    }
+  ],
+  "categories": {
+    "correctness": "error"
+  },
+  "settings": {
+    "import-x/resolver": {
+      "typescript": {
+        "project": [
+          "server/tsconfig.json"
+        ],
+        "alwaysTryTypes": true,
+        "noWarnOnMultipleProjects": true
+      },
+      "node": {
+        "extensions": [
+          ".mjs",
+          ".cjs",
+          ".js",
+          ".json",
+          ".node",
+          ".ts",
+          ".tsx"
+        ]
+      }
+    },
+    "import/resolver": {
+      "typescript": {
+        "project": [
+          "server/tsconfig.json"
+        ],
+        "alwaysTryTypes": true,
+        "noWarnOnMultipleProjects": true
+      },
+      "node": {
+        "extensions": [
+          ".mjs",
+          ".cjs",
+          ".js",
+          ".json",
+          ".node",
+          ".ts",
+          ".tsx"
+        ]
+      }
+    },
+    "boundaries/include": [
+      "server/**/*.js",
+      "server/**/*.ts"
+    ],
+    "boundaries/elements": [
+      {
+        "type": "backend-shared-barrel",
+        "pattern": "server/shared/index.ts",
+        "mode": "file"
+      },
+      {
+        "type": "backend-shared-type-contract",
+        "pattern": [
+          "server/shared/types.{js,ts}",
+          "server/shared/interfaces.{js,ts}"
+        ],
+        "mode": "file"
+      },
+      {
+        "type": "backend-shared-utils",
+        "pattern": [
+          "server/shared/utils.{js,ts}",
+          "server/shared/frontmatter.ts",
+          "server/shared/claude-cli-path.ts",
+          "server/shared/image-attachments.ts",
+          "server/shared/message-unification.ts"
+        ],
+        "mode": "file"
+      },
+      {
+        "type": "backend-module",
+        "pattern": "server/modules/*",
+        "mode": "folder",
+        "capture": [
+          "moduleName"
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "no-case-declarations": "off",
+    "no-control-regex": "off",
+    "no-useless-escape": "off",
+    "typescript/no-explicit-any": "off",
+    "typescript/no-require-imports": "off",
+    "react/set-state-in-effect": "warn",
+    "react/refs": "warn",
+    "react/static-components": "warn",
+    "react/preserve-manual-memoization": "warn",
+    "react/immutability": "warn",
+    "react/purity": "warn"
+  },
+  "overrides": [
+    {
+      "files": [
+        "server/**/*.js",
+        "server/**/*.ts"
+      ],
+      "excludeFiles": [
+        "server/**/*.d.ts"
+      ],
+      "rules": {
+        "no-unused-vars": "off",
+        "no-async-promise-executor": "warn",
+        "no-extra-boolean-cast": "warn",
+        "no-unsafe-optional-chaining": "warn",
+        "import/no-duplicates": "warn",
+        "importx/order": [
+          "warn",
+          {
+            "groups": [
+              "builtin",
+              "external",
+              "internal",
+              "parent",
+              "sibling",
+              "index"
+            ],
+            "newlines-between": "always"
+          }
+        ],
+        "importx/no-unresolved": "error",
+        "importx/no-useless-path-segments": "warn",
+        "import/no-absolute-path": "error",
+        "eqeqeq": [
+          "warn",
+          "always",
+          {
+            "null": "ignore"
+          }
+        ],
+        "boundaries/dependencies": [
+          "error",
+          {
+            "default": "allow",
+            "checkInternals": false,
+            "rules": [
+              {
+                "from": {
+                  "type": "backend-module"
+                },
+                "to": {
+                  "type": "backend-shared-type-contract"
+                },
+                "disallow": {
+                  "dependency": {
+                    "kind": [
+                      "value",
+                      "typeof"
+                    ]
+                  }
+                },
+                "message": "Backend modules may only use `import type` when importing from server/shared/types.ts or server/shared/interfaces.ts."
+              },
+              {
+                "to": {
+                  "type": "backend-module"
+                },
+                "disallow": {
+                  "to": {
+                    "internalPath": "**"
+                  }
+                },
+                "message": "Cross-module imports must go through that module's barrel file (server/modules/<module>/index.ts or index.js)."
+              },
+              {
+                "to": {
+                  "type": "backend-module"
+                },
+                "allow": {
+                  "to": {
+                    "internalPath": [
+                      "index",
+                      "index.{js,mjs,cjs,ts,tsx}"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "boundaries/no-unknown": "error"
+      }
+    }
+  ]
+}

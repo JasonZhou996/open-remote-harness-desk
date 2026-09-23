@@ -1,0 +1,17 @@
+[Unit]
+Description=Reverse tunnel from unified WebUI to configured host
+ConditionPathExists=%h/.config/open-remote-harness-desk/tunnel.env
+Wants=network-online.target codex-webui.service
+After=network-online.target codex-webui.service
+PartOf=ai-webui.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/open-remote-harness-desk/tunnel.env
+ExecStartPre=-/usr/bin/ssh -i ${ORHD_TUNNEL_KEY} -o BatchMode=yes -o ConnectTimeout=5 -p ${ORHD_TUNNEL_PORT} ${ORHD_TUNNEL_TARGET} fuser -k 18899/tcp
+ExecStart=/usr/bin/ssh -NT -i ${ORHD_TUNNEL_KEY} -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -p ${ORHD_TUNNEL_PORT} -R 127.0.0.1:18899:127.0.0.1:8899 ${ORHD_TUNNEL_TARGET}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=ai-webui.target

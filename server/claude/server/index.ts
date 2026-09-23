@@ -1,0 +1,252 @@
+#!/usr/bin/env node
+// Load environment variables before other imports execute.
+import './load-env.js';
+import fs, { promises as fsPromises } from 'fs';
+import path from 'path';
+import os from 'os';
+import http from 'http';
+
+import express, { type NextFunction, type Request, type Response } from 'express';
+import cors from 'cors';
+
+import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, terminalTextStyles } from '@/shared/utils.js';
+import {
+    closeSessionsWatcher,
+    initializeSessionsWatcher,
+    providerRuntimeService,
+} from '@/modules/providers/index.js';
+import { createWebSocketServer } from '@/modules/websocket/index.js';
+
+import { getConnectableHost } from '../shared/networkHosts.js';
+
+import {createScheduledMessagesRouter, startScheduledMessages} from './modules/scheduled-messages/index.js';
+import {
+    authenticateToken,
+    authenticateWebSocket,
+    authRoutes,
+    validateApiKey,
+} from './modules/auth/index.js';
+import { settingsRoutes } from './modules/settings/index.js';
+import projectModuleRoutes from './modules/projects/projects.routes.js';
+import { startProjectInstructionsSync } from './modules/projects/index.js';
+import { userRoutes } from './modules/user/index.js';
+import providerRoutes from './modules/providers/provider.routes.js';
+import { initializeDatabase, sessionsDb } from './modules/database/index.js';
+import { commandsRoutes } from './modules/commands/index.js';
+import { assetsRoutes } from './modules/assets/index.js';
+import { fileTreeRoutes } from './modules/file-tree/index.js';
+
+const __dirname = getModuleDirectory(import.meta.url);
+// The server source runs from /server, while the compiled output runs from /dist-server/server.
+// Resolving the app root once keeps every repo-level lookup below aligned across both layouts.
+const APP_ROOT = findApplicationRoot(__dirname);
+const installMode = fs.existsSync(path.join(APP_ROOT, '.git')) ? 'git' : 'npm';
+// Version of the code that is actually running, captured once at process
+// startup. This intentionally does NOT re-read package.json per request: after
+// an update replaces the files on disk, package.json reflects the NEW version
+// while this long-lived process still runs the OLD code. The frontend bundle is
+// rebuilt on update, so a mismatch between this value and the frontend's
+// build-time version means the server was updated but not restarted.
+const RUNNING_VERSION = (() => {
+    try {
+        return JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'package.json'), 'utf8')).version || null;
+    } catch {
+        return null;
+    }
+})();
+console.log('SERVER_PORT from env:', process.env.SERVER_PORT);
+
+const app = express();
+const server = http.createServer(app);
+const queryClaude = providerRuntimeService.getRunner('claude');
+
+// Single WebSocket server that handles the chat path.
+createWebSocketServer(server, {
+    verifyClient: {
+        isPlatform: IS_PLATFORM,
+        authenticateWebSocket,
+    },
+    chat: {
+        runtime: providerRuntimeService,
+    },
+});
+
+app.use(cors({ exposedHeaders: ['X-Refreshed-Token', 'X-Auth-Error'] }));
+app.use(express.json({
+    limit: '50mb',
+    type: (req: http.IncomingMessage) => {
+        // Skip multipart/form-data requests (for file uploads like images)
+        const contentType = req.headers['content-type'] || '';
+        if (contentType.includes('multipart/form-data')) {
+            return false;
+        }
+        return contentType.includes('json');
+    }
+}));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Public health check endpoint (no authentication required)
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        installMode,
+        version: RUNNING_VERSION
+    });
+});
+
+// Optional API key validation (if configured)
+app.use('/api', validateApiKey);
+
+// Authentication routes (public)
+app.use('/api/auth', authRoutes);
+
+// File Tree API Routes (protected)
+
+// Projects API Routes (protected)
+app.use('/api/projects', authenticateToken, projectModuleRoutes);
+
+// 聊天要用的三样:斜杠命令、附件、@文件提及
+app.use('/api/file-tree', authenticateToken, fileTreeRoutes);
+app.use('/api/assets', authenticateToken, assetsRoutes);
+app.use('/api/commands', authenticateToken, commandsRoutes);
+
+// Chat attachment upload/serving (global ~/.cloudcli/assets store, protected)
+
+// Commands API Routes (protected)
+
+// Settings API Routes (protected)
+app.use('/api/settings', authenticateToken, settingsRoutes);
+
+
+
+
+
+// User API Routes (protected)
+app.use('/api/user', authenticateToken, userRoutes);
+
+// Unified provider MCP routes (protected)
+app.use('/api/providers', authenticateToken, providerRoutes);
+app.use('/api/scheduled-messages', authenticateToken, createScheduledMessagesRouter());
+
+
+// global error middleware must be last
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof AppError) {
+    return res.status(err.statusCode).json({
+      success: false,
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details,
+      },
+    });
+  }
+
+  console.error(err);
+
+  return res.status(500).json({
+    success: false,
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+    },
+  });
+});
+
+const SERVER_PORT = Number.parseInt(process.env.SERVER_PORT || '3001', 10);
+const HOST = process.env.HOST || '0.0.0.0';
+const DISPLAY_HOST = getConnectableHost(HOST);
+const LOCAL_SERVER_MARKER_PATH = path.join(os.homedir(), '.cloudcli', 'local-server.json');
+
+function getErrorCode(error: unknown): string | undefined {
+    if (typeof error !== 'object' || error === null || !('code' in error)) {
+        return undefined;
+    }
+    return String(error.code);
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+async function writeLocalServerMarker() {
+    const marker = {
+        pid: process.pid,
+        host: HOST,
+        port: Number.parseInt(String(SERVER_PORT), 10),
+        url: `http://${DISPLAY_HOST}:${SERVER_PORT}`,
+        installMode,
+        appRoot: APP_ROOT,
+        updatedAt: new Date().toISOString(),
+    };
+
+    await fsPromises.mkdir(path.dirname(LOCAL_SERVER_MARKER_PATH), { recursive: true });
+    await fsPromises.writeFile(LOCAL_SERVER_MARKER_PATH, JSON.stringify(marker, null, 2), 'utf8');
+}
+
+async function removeLocalServerMarker() {
+    try {
+        const raw = await fsPromises.readFile(LOCAL_SERVER_MARKER_PATH, 'utf8');
+        const marker = JSON.parse(raw);
+        if (marker.pid && marker.pid !== process.pid) return;
+    } catch (error) {
+        if (getErrorCode(error) === 'ENOENT') return;
+    }
+
+    try {
+        await fsPromises.unlink(LOCAL_SERVER_MARKER_PATH);
+    } catch (error) {
+        if (getErrorCode(error) !== 'ENOENT') {
+            console.warn('[WARN] Could not remove local server marker:', getErrorMessage(error));
+        }
+    }
+}
+
+// Initialize database and start server
+async function startServer() {
+    try {
+        // Initialize authentication database
+        await initializeDatabase();
+        startProjectInstructionsSync();
+        startScheduledMessages(providerRuntimeService);
+
+        console.log('[INFO] Claude service using Claude Agent SDK');
+
+        server.listen(SERVER_PORT, HOST, async () => {
+            const appInstallPath = APP_ROOT;
+            await writeLocalServerMarker().catch((error) => {
+                console.warn('[WARN] Could not write local server marker:', error.message);
+            });
+
+            console.log('');
+            console.log(terminalTextStyles.dim('═'.repeat(63)));
+            console.log(`  ${terminalTextStyles.bright('三端 Web · Claude service ready')}`);
+            console.log(terminalTextStyles.dim('═'.repeat(63)));
+            console.log('');
+            console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright('http://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
+            console.log(`${terminalTextStyles.info('[INFO]')} Installed at: ${terminalTextStyles.dim(appInstallPath)}`);
+            console.log('');
+
+            // Start watching the projects folder for changes
+            await initializeSessionsWatcher();
+        });
+
+        await closeSessionsWatcher();
+        const shutdownRuntimeServices = async () => {
+            try {
+                await removeLocalServerMarker();
+            } catch (err) {
+                console.error('[Local Server] Error removing server marker during shutdown:', getErrorMessage(err));
+            }
+            process.exit(0);
+        };
+        process.on('SIGTERM', () => void shutdownRuntimeServices());
+        process.on('SIGINT', () => void shutdownRuntimeServices());
+    } catch (error) {
+        console.error('[ERROR] Failed to start server:', error);
+        process.exit(1);
+    }
+}
+
+startServer();

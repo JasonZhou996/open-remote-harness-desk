@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      const mobilePlatform=navigator.userAgentData?.platform==='Android'||/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+      if(mobilePlatform||(matchMedia('(pointer:coarse)').matches&&Math.min(screen.width,screen.height)<720))document.documentElement.classList.add('mobile-device');
+      // Pre-paint hint only. The live source of truth is the shared codex-webui-theme key
+      // (followed by SettingsContext); never write it from here so 'system' stays unpinned.
+      try {
+        var shared = localStorage.getItem('codex-webui-theme');
+        var theme = new URLSearchParams(location.search).get('theme')
+          || (shared === 'light' || shared === 'dark' ? shared
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+        document.documentElement.classList.toggle('light', theme === 'light');
+        document.documentElement.classList.toggle('dark', theme !== 'light');
+      } catch (e) {}
+    </script>
+    <link rel="icon" type="image/svg+xml" href="/claude-logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="三端 Web" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <script src="/system-theme.js" defer></script>
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/assets/codex-lan-icon.png" />
+    <title>Claude</title>
+  </head>
+  <body class="selection:bg-[#DA7756]/30 overflow-hidden antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

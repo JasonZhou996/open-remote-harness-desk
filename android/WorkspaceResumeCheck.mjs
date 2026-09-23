@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createRequire} from 'node:module';
+const {JSDOM}=createRequire(new URL('../package.json',import.meta.url))('jsdom');
+const script=readFileSync(new URL('assets/workspace-resume.js',import.meta.url),'utf8');
+let saved={};
+const open=(url,existing={})=>{
+  const dom=new JSDOM('',{url,runScripts:'outside-only'});
+  const window=dom.window;
+  for(const [key,value] of Object.entries(existing))window.localStorage.setItem(key,value);
+  window.CodexWorkspaceState={postMessage(body){const {key,value}=JSON.parse(body);saved[key]=value;}};
+  window.eval(`(${script})(${JSON.stringify(saved)},'webview-instance');`);
+  return window;
+};
+const lan=open('http://192.168.1.100:8899/');
+lan.localStorage.setItem('codex-webui-last-product','claude');
+lan.localStorage.setItem('claude-workspace-view',JSON.stringify({sessionId:'native-session',paneOpen:true,preview:{id:'file',sourcePath:'/work/example.html'}}));
+lan.localStorage.setItem('claude-workspace-scroll',JSON.stringify({sessionId:'native-session',top:920,follow:false}));
+lan.localStorage.setItem('zcodeJwtToken','must-not-copy');
+lan.localStorage.setItem('password','must-not-copy');
+lan.localStorage.setItem('codex-webui-active-thread','old');
+lan.localStorage.removeItem('codex-webui-active-thread');
+lan.close();
+const remote=open('https://public.example:3391/',{'codex-webui-active-thread':'stale','claude-workspace-view':'stale'});
+assert.equal(remote.localStorage.getItem('codex-webui-last-product'),'claude');
+assert.equal(JSON.parse(remote.localStorage.getItem('claude-workspace-view')).preview.sourcePath,'/work/example.html');
+assert.equal(JSON.parse(remote.localStorage.getItem('claude-workspace-scroll')).top,920);
+assert.equal(remote.localStorage.getItem('codex-webui-active-thread'),null);
+assert.equal(remote.localStorage.getItem('zcodeJwtToken'),null);
+assert.equal(saved.password,undefined);
+remote.localStorage.setItem('claude-workspace-view',JSON.stringify({sessionId:null,paneOpen:false,preview:null}));
+// Re-running document-start during a same-WebView navigation must not restore an old snapshot.
+remote.eval(`(${script})({"claude-workspace-view":"stale"},'webview-instance');`);
+assert.equal(JSON.parse(remote.localStorage.getItem('claude-workspace-view')).paneOpen,false);
+remote.close();
+const again=open('http://192.168.1.100:8899/claude/app/');
+assert.deepEqual(JSON.parse(again.localStorage.getItem('claude-workspace-view')),{sessionId:null,paneOpen:false,preview:null});
+again.close();
+const preview=open('https://public.example:3391/api/files/preview');
+assert.equal(preview.localStorage.getItem('claude-workspace-view'),null,'preview documents never receive injected workspace state');
+preview.close();
+// Native navigation updates the profile before creating a fresh WebView.
+// The document-start hook must override even a broken harness's old local state.
+saved['codex-webui-last-product']='codex';
+const recovered=open('https://public.example:3391/',{'codex-webui-last-product':'claude'});
+assert.equal(recovered.localStorage.getItem('codex-webui-last-product'),'codex');
+const bootstrap=readFileSync(new URL('../web/codex/auth-bootstrap.js',import.meta.url),'utf8');
+const redirect=bootstrap.slice(bootstrap.indexOf("  if(location.pathname==='/'){"),bootstrap.indexOf('  for(const href'));
+recovered.eval(`(function(){${redirect}})()`);
+assert.equal(recovered.location.pathname,'/','Native Codex selection must not redirect back into an unavailable harness');
+recovered.close();
+const reconnect=open('http://192.168.1.100:8899/',{'codex-webui-last-product':'claude'});
+assert.equal(reconnect.localStorage.getItem('codex-webui-last-product'),'codex','Choice survives reconnect and LAN/public switching');
+reconnect.close();
+console.log('PASS: LAN/public restoration, closed preview/new chat, navigation, secret exclusion, preview isolation');

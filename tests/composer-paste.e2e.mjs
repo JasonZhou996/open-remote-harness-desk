@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {readFile,rm} from 'node:fs/promises';
+import {dirname} from 'node:path';
+import {launchOptions} from './browser-runtime.mjs';
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright');
+const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
+const browser=await chromium.launch(launchOptions());let uploaded;
+try {
+ const page=await browser.newPage(),calls=[],errors=[];
+ page.on('pageerror',error=>errors.push(error.message));
+ await page.route('**/api/rpc',async route=>{const {id,method,params}=route.request().postDataJSON();calls.push({method,params});await route.fulfill({json:{type:'rpc/result',id,result:{data:[]}}});});
+ await page.goto(process.env.CODEX_WEBUI_TEST_URL||'http://127.0.0.1:8899',{waitUntil:'domcontentloaded'});
+ await page.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);
+ await page.evaluate(()=>{const api=globalThis.__codexWebuiDebug;api.startNewTask();api.state.transport='sse';api.state.active={id:'paste-check',cwd:api.state.config.defaultCwd,turns:[],canAcceptDirectInput:true};});
+ const paste=files=>page.locator('#prompt').evaluate((input,{png,files})=>{const clipboard=new DataTransfer();if(files)clipboard.items.add(new File([Uint8Array.from(atob(png),c=>c.charCodeAt(0))],'paste-check.png',{type:'image/png'}));else clipboard.setData('text/plain','ordinary text');const event=new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true});input.dispatchEvent(event);return event.defaultPrevented;},{png,files});
+ assert.equal(await paste(false),false,'ordinary text keeps native paste behavior');
+ assert.equal(await paste(true),true,'image paste must enter the attachment upload path');
+ await page.waitForFunction(()=>globalThis.__codexWebuiDebug.state.composerMentions.some(item=>item.source==='upload'));
+ uploaded=await page.evaluate(()=>globalThis.__codexWebuiDebug.state.composerMentions.find(item=>item.source==='upload'));
+ assert.ok(uploaded.path.startsWith('/tmp/codex-webui-upload-'));
+ assert.deepEqual(await readFile(uploaded.path),Buffer.from(png,'base64'));
+ await page.waitForFunction(()=>{const img=document.querySelector('#composerContextTray img');return img?.complete&&img.naturalWidth>0;});
+ await page.locator('#sendButton').click();
+ await page.waitForFunction(()=>document.querySelector('.user-message img')?.naturalWidth>0);
+ const sent=calls.find(call=>call.method==='turn/start');
+ assert.deepEqual(sent.params.input,[{type:'localImage',path:uploaded.path}]);
+ assert.equal(await page.locator('#composerContextTray').isHidden(),true);
+ assert.deepEqual(errors,[]);
+ console.log('PASS: image paste -> real upload -> decoded preview -> image-only user message and localImage input; plain text unchanged');
+} finally {await browser.close();if(uploaded?.path.startsWith('/tmp/codex-webui-upload-'))await rm(dirname(uploaded.path),{recursive:true});}

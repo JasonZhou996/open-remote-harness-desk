@@ -1,0 +1,16 @@
+[Unit]
+Description=Publish Codex WebUI LAN address to the public discovery cache
+ConditionPathExists=%h/.config/open-remote-harness-desk/tunnel.env
+Wants=network-online.target codex-webui.service
+After=network-online.target codex-webui.service
+PartOf=codex-webui.service ai-webui.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/open-remote-harness-desk/tunnel.env
+ExecStart=/usr/bin/python3 @PROJECT_ROOT@/scripts/publish-lan.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=ai-webui.target

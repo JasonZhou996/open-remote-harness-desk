@@ -1,0 +1,7 @@
+[Unit]
+Description=Codex, ZCode and Claude Code unified WebUI
+Wants=codex-webui.service claude-bridge.service zcode-local.service codex-webui-tunnel.service codex-webui-lan-publish.service
+After=codex-webui.service claude-bridge.service zcode-local.service codex-webui-tunnel.service codex-webui-lan-publish.service
+
+[Install]
+WantedBy=default.target

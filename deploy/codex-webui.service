@@ -1,0 +1,16 @@
+[Unit]
+Description=Codex WebUI gateway and ZCode relay
+Wants=network-online.target
+After=network-online.target
+PartOf=ai-webui.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@
+EnvironmentFile=%h/.config/codex-webui/proxy.env
+ExecStart=@PROJECT_ROOT@/scripts/start-gateway.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=ai-webui.target

@@ -1,0 +1,11 @@
+{
+  "id": "/",
+  "name": "三端 Web",
+  "short_name": "三端 Web",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#181818",
+  "theme_color": "#181818",
+  "icons": [{"src": "/assets/codex-lan-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}]
+}

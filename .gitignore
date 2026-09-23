@@ -1,0 +1,43 @@
+# Dependencies and generated output
+node_modules/
+dist/
+dist-server/
+dist-server.next/
+dist-server.old/
+build/
+coverage/
+*.tsbuildinfo
+/web/codex/app.bundle.js
+
+# Local credentials and runtime data
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.apk
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.pid
+*.log
+/server/claude/database/
+/android/lib/
+
+# Local inspection and test artifacts
+docs/
+/tests/webui-live-check.mjs
+/tests/webui-queue-check.mjs
+.artifacts/
+/.codex-desktop-reference/
+/.playwright-cli/
+/index.html
+.DS_Store
+approval-e2e-*.png
+browser-smoke.png
+mobile-layout.png
+surfaces-*.png
